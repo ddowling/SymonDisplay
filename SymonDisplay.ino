@@ -1,3 +1,5 @@
+#include "font.h"
+
 enum
 {
     BUS0 = PA0,
@@ -172,8 +174,6 @@ void setup()
     display_clear();
 }
 
-extern const unsigned char font5x7[];
-
 const int _width = 64;
 const int _height = 8;
 
@@ -187,13 +187,15 @@ void display_char(int16_t x, int16_t y, char c)
        ((y + 8 - 1) < 0))   // Clip top
         return;
 
+    const unsigned char *font_char = getFontChar(c);
+
     for (int8_t i = 0; i < 6; i++)
     {
         uint8_t v_line;
         if (i == 5)
             v_line = 0x0;
         else
-            v_line = font5x7[c*5+i];
+            v_line = font_char[i];
 
         for (int8_t j = 0; j < 8; j++)
         {
@@ -221,6 +223,7 @@ void loop()
 
     char buf[20];
     sprintf(buf, "Count=%d", count);
+    // FIXME 1 for some fonts?
     display_str(2, 0, buf);
 
     digitalWrite(LED, count%2);
