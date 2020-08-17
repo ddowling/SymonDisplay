@@ -1,4 +1,5 @@
 #include "font.h"
+#include <uart.h>
 
 enum
 {
@@ -35,6 +36,11 @@ void display_set_x_y(uint8_t x, uint8_t y, bool val)
         display[x] |= (1<<y);
     else
         display[x] &= ~(1<<y);
+}
+
+void display_toggle()
+{
+    // TODO
 }
 
 void update_shift_registers(uint8_t row)
@@ -138,44 +144,11 @@ void compare_callback()
 }
 
 HardwareTimer timer(TIM1);
-
-void setup()
-{
-    // Bus pin D0 - D7 map to DIO 2 - 10
-    pinMode(BUS0, OUTPUT);
-    pinMode(BUS1, OUTPUT);
-    pinMode(BUS2, OUTPUT);
-    pinMode(BUS3, OUTPUT);
-    pinMode(BUS4, OUTPUT);
-    pinMode(BUS5, OUTPUT);
-    pinMode(BUS6, OUTPUT);
-    pinMode(BUS7, OUTPUT);
-
-    // Column shift registers clock
-    pinMode(COL_SR, OUTPUT);
-    digitalWrite(COL_SR, HIGH);
-
-    // Row select latch
-    pinMode(ROW_LATCH, OUTPUT);
-    digitalWrite(ROW_LATCH, HIGH);
-
-    // Timer to drive display updates
-    int channel = 1;
-    timer.setMode(channel, TIMER_OUTPUT_COMPARE);
-    timer.setOverflow(800, MICROSEC_FORMAT);
-    //timer.setCaptureCompare(channel, 250, MICROSEC_COMPARE_FORMAT);
-    timer.setCaptureCompare(channel, 10, PERCENT_COMPARE_FORMAT);
-    timer.attachInterrupt(update_callback);
-    timer.attachInterrupt(channel, compare_callback);
-    timer.resume();
-
-    pinMode(LED, OUTPUT);
-
-    display_clear();
-}
+int timer_channel = 1;
 
 const int _width = 64;
 const int _height = 8;
+uint8_t font_id = 0;
 
 // Draw a character
 void display_char(int16_t x, int16_t y, char c)
@@ -187,7 +160,7 @@ void display_char(int16_t x, int16_t y, char c)
        ((y + 8 - 1) < 0))   // Clip top
         return;
 
-    const unsigned char *font_char = getFontChar(c);
+    const unsigned char *font_char = getFontChar(c, font_id);
 
     for (int8_t i = 0; i < 6; i++)
     {
@@ -215,20 +188,132 @@ void display_str(int16_t x, int16_t y, const char *str)
     }
 }
 
-int count = 0;
+void setup()
+{
+    Serial.begin(115200);
+    Serial.println("Boot");
+
+    // Bus pin D0 - D7 map to DIO 2 - 10
+    pinMode(BUS0, OUTPUT);
+    pinMode(BUS1, OUTPUT);
+    pinMode(BUS2, OUTPUT);
+    pinMode(BUS3, OUTPUT);
+    pinMode(BUS4, OUTPUT);
+    pinMode(BUS5, OUTPUT);
+    pinMode(BUS6, OUTPUT);
+    pinMode(BUS7, OUTPUT);
+
+    // Column shift registers clock
+    pinMode(COL_SR, OUTPUT);
+    digitalWrite(COL_SR, HIGH);
+
+    // Row select latch
+    pinMode(ROW_LATCH, OUTPUT);
+    digitalWrite(ROW_LATCH, HIGH);
+
+    // Timer to drive display updates
+    timer.setMode(timer_channel, TIMER_OUTPUT_COMPARE);
+    timer.setOverflow(800, MICROSEC_FORMAT);
+    //timer.setCaptureCompare(timer_channel, 250, MICROSEC_COMPARE_FORMAT);
+    timer.setCaptureCompare(timer_channel, 10, PERCENT_COMPARE_FORMAT);
+    timer.attachInterrupt(update_callback);
+    timer.attachInterrupt(timer_channel, compare_callback);
+    timer.resume();
+
+    pinMode(LED, OUTPUT);
+
+    display_clear();
+    display_toggle();
+}
+
+bool cmd_mode = false;
+int cmd_pos = 0;
+char cmd_buffer[256];
+
+int line_pos = 0;
+char line_buffer[256];
+
+void do_command()
+{
+    const char *cmd = strtok(cmd_buffer, " ");
+
+    if (strcmp(cmd, "brightness") == 0)
+    {
+        const char *v_str = strtok(0, " ");
+
+        int v = atoi(v_str);
+
+        if (v >= 0 && v <= 100)
+            timer.setCaptureCompare(timer_channel, v, PERCENT_COMPARE_FORMAT);
+    }
+    else if (strcmp(cmd, "reset") == 0)
+    {
+        // Force an STM32 reset
+        NVIC_SystemReset();
+    }
+    else if (strcmp(cmd, "font") == 0)
+    {
+        const char *v_str = strtok(0, " ");
+
+        font_id = atoi(v_str);
+    }
+}
 
 void loop()
 {
-    display_clear();
+    if (Serial.available())
+    {
+        char c = Serial.read();
 
-    char buf[20];
-    sprintf(buf, "Count=%d", count);
-    // FIXME 1 for some fonts?
-    display_str(2, 0, buf);
+        bool changed = false;
 
-    digitalWrite(LED, count%2);
+        if (c == '\n' || c == '\r')
+        {
+            if (cmd_mode)
+            {
+                cmd_mode = false;
+                cmd_pos = 0;
+                line_pos = 0;
 
-    count++;
+                do_command();
+            }
+            else
+            {
+                // Just reset to line start so the next characters will
+                // start with a clear line
+                line_pos = 0;
+            }
+        }
+        else if (cmd_mode)
+        {
+            if (cmd_pos < sizeof(cmd_buffer))
+            {
+                cmd_buffer[cmd_pos++] = c;
+                cmd_buffer[cmd_pos] = '\0';
+            }
+        }
+        else if (line_pos == 0 && c == '@')
+        {
+            // Start of new command
+            cmd_mode = true;
+        }
+        else if (isprint(c))
+        {
+            if (line_pos < sizeof(line_buffer))
+            {
+                line_buffer[line_pos++] = c;
+                line_buffer[line_pos] = '\0';
+                changed = true;
+            }
+        }
 
-    delay(1000);
+        if (changed)
+        {
+            display_clear();
+            display_str(2, 0, line_buffer);
+            display_toggle();
+        }
+    }
+
+    bool scroll_needed = (line_pos >= 10);
 }

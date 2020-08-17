@@ -30,15 +30,27 @@
 #include "fonts/renew_font.h"
 #undef font
 
+// Works
 #include "font5x7.h"
 
-const unsigned char *getFontChar(char c)
+const unsigned char *getFontChar(char c, uint8_t font_id)
 {
-    return &font5x7[c*5];
-    //return bmplain_font[c - ' '];
-    //return first_font[c - ' '];
-    //return five_five_font[c - ' '];
-    //return sloth_font[c - ' '];
-    //return haiku_font[c - ' '];
-    //return renew_font[c - ' '];
+    switch(font_id)
+    {
+    case 0:
+    default:
+        return &font5x7[c*5];
+    case 1:
+        return bmplain_font[c - ' '];
+    case 2:
+        return first_font[c - ' '];
+    case 3:
+        return five_five_font[c - ' '];
+    case 4:
+        return sloth_font[c - ' '];
+    case 5:
+        return haiku_font[c - ' '];
+    case 6:
+        return renew_font[c - ' '];
+    }
 }
